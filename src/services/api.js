@@ -1,206 +1,312 @@
-import axios from 'axios';
+import { jsPDF } from 'jspdf';
+import 'jspdf-autotable';
 
-// API Base URLs
-const AUDIO_API_URL = 'https://audio-deepfake-detector.reddune-ee354d90.francecentral.azurecontainerapps.io/api/v1';
-const TEXT_API_URL = 'https://text-credibility-detector.reddune-ee354d90.francecentral.azurecontainerapps.io';
+const Results = ({ result, isLoading }) => {
+  // --- Base URL for the audio API (for report links) ---
+  const AUDIO_API_BASE = 'https://audio-deepfake-detector.reddune-ee354d90.francecentral.azurecontainerapps.io';
 
-// ============================================================
-// AUDIO DEEPFAKE DETECTION
-// ============================================================
+  // --- Generate a local PDF report (fallback) ---
+  const generateLocalPDF = (data) => {
+    const doc = new jsPDF('p', 'mm', 'a4');
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const margin = 15;
+    let yPos = 20;
 
-export const analyzeAudio = async (file) => {
-  const formData = new FormData();
-  formData.append('file', file);
+    // Title
+    doc.setFontSize(22);
+    doc.setTextColor(26, 26, 46);
+    doc.text('DeepFake Detectors', margin, yPos);
+    yPos += 10;
 
-  try {
-    const response = await axios.post(`${AUDIO_API_URL}/detect`, formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-      timeout: 60000,
-    });
+    doc.setFontSize(14);
+    doc.setTextColor(100, 100, 130);
+    doc.text('Analysis Report', margin, yPos);
+    yPos += 8;
 
-    const data = response.data;
-    console.log('Audio API Response:', data);
+    doc.setDrawColor(200, 200, 210);
+    doc.line(margin, yPos, pageWidth - margin, yPos);
+    yPos += 10;
 
-    // --- Parse the actual response ---
-    const prediction = data.prediction || 'unknown';
-    const confidence = data.confidence || 0.5;
-    const scores = data.scores || {};
-    const reportLink = data.report_download_link || null;
-    const requestId = data.request_id || null;
-    
-    // --- Determine verdict ---
-    let verdict = 'POSSIBLY SYNTHETIC';
-    const predLower = prediction.toLowerCase();
-    if (predLower === 'bona-fide' || predLower === 'real' || predLower === 'authentic') {
-      verdict = 'LIKELY AUTHENTIC';
-    } else if (predLower === 'spoof' || predLower === 'fake' || predLower === 'synthetic') {
-      verdict = 'LIKELY SYNTHETIC';
-    } else if (confidence < 0.45) {
-      verdict = 'LIKELY AUTHENTIC';
-    } else if (confidence >= 0.45 && confidence <= 0.55) {
-      verdict = 'POSSIBLY SYNTHETIC';
-    }
+    // Verdict
+    doc.setFontSize(16);
+    doc.setTextColor(26, 26, 46);
+    doc.text('Verdict:', margin, yPos);
+    const verdictText = data.verdict || 'N/A';
+    const isFake = verdictText.toLowerCase().includes('fake') ||
+                   verdictText.toLowerCase().includes('synthetic') ||
+                   verdictText.toLowerCase().includes('misinformation');
+    doc.setTextColor(isFake ? 255 : 46, isFake ? 71 : 213, isFake ? 87 : 115);
+    doc.text(verdictText, margin + 30, yPos);
+    yPos += 8;
 
-    // --- Build explanation from scores ---
-    const explanation = [];
-    
-    if (scores && typeof scores === 'object') {
-      for (const [model, score] of Object.entries(scores)) {
-        const modelName = model.charAt(0).toUpperCase() + model.slice(1).replace(/_/g, ' ');
-        const status = score > 0.5 ? 'detected synthetic patterns' : 'detected natural patterns';
-        explanation.push(`${modelName}: ${(score * 100).toFixed(1)}% — ${status}`);
-      }
-    }
-    
-    explanation.push(`Overall confidence: ${(confidence * 100).toFixed(1)}%`);
-    
-    if (data.emotion_labels && data.emotion_labels.length > 0) {
-      explanation.push(`Detected emotion(s): ${data.emotion_labels.join(', ')}`);
-    }
+    // Confidence
+    doc.setFontSize(14);
+    doc.setTextColor(26, 26, 46);
+    doc.text(`Confidence: ${data.confidence !== undefined ? Math.round(data.confidence * 100) + '%' : 'N/A'}`, margin, yPos);
+    yPos += 10;
 
-    return {
-      verdict: verdict,
-      confidence: confidence,
-      explanation: explanation,
-      request_id: requestId,
-      report_link: reportLink,
-      raw: data
-    };
-  } catch (error) {
-    console.error('Audio API Error:', error);
-    let errorMessage = 'Analysis failed. Please try again.';
-    if (error.response) {
-      errorMessage = `API Error ${error.response.status}: ${error.response.data?.msg || error.response.data?.detail || error.response.statusText}`;
-    } else if (error.request) {
-      errorMessage = 'No response from server. Please check your connection.';
-    }
-    throw new Error(errorMessage);
-  }
-};
+    // Explanation
+    doc.setFontSize(14);
+    doc.setTextColor(26, 26, 46);
+    doc.text('Explanation:', margin, yPos);
+    yPos += 6;
 
-// ============================================================
-// TEXT CREDIBILITY DETECTION
-// ============================================================
-
-export const analyzeText = async (text) => {
-  try {
-    const response = await axios.post(
-      `${TEXT_API_URL}/api/v1/credibility/analyze`,
-      { text: text },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        timeout: 60000,
-      }
-    );
-
-    const data = response.data;
-    console.log('Text API Response:', data);
-
-    const score = data.credibility_score || 0;
-    let verdict = 'LIKELY AUTHENTIC';
-
-    if (score >= 0.75) {
-      verdict = 'LIKELY AUTHENTIC';
-    } else if (score >= 0.33) {
-      verdict = 'NEEDS REVIEW';
-    } else {
-      verdict = 'LIKELY MISINFORMATION';
-    }
-
-    const explanation = [];
-    
-    if (data.signals?.fact_check?.matches) {
-      explanation.push(`Fact-check: ${data.signals.fact_check.matches.length} matches found`);
-    }
-    if (data.signals?.claimbuster?.score !== undefined) {
-      explanation.push(`ClaimBuster credibility: ${Math.round(data.signals.claimbuster.score * 100)}%`);
-    }
-    if (data.signals?.content_analysis?.flags) {
-      data.signals.content_analysis.flags.forEach(flag => {
-        explanation.push(flag);
+    doc.setFontSize(12);
+    doc.setTextColor(60, 60, 80);
+    if (data.explanation && data.explanation.length > 0) {
+      data.explanation.forEach((item) => {
+        const lines = doc.splitTextToSize(`• ${item}`, pageWidth - margin * 2);
+        doc.text(lines, margin, yPos);
+        yPos += lines.length * 6;
+        if (yPos > 270) {
+          doc.addPage();
+          yPos = 20;
+        }
       });
+    } else {
+      doc.text('No detailed explanation available.', margin, yPos);
+      yPos += 6;
     }
 
-    if (explanation.length === 0) {
-      if (score >= 0.75) {
-        explanation.push('Content shows strong credibility indicators');
-      } else if (score >= 0.33) {
-        explanation.push('Content has mixed signals and may need human review');
-      } else {
-        explanation.push('Content shows multiple warning signs of misinformation');
+    // Request ID
+    if (data.request_id) {
+      yPos += 4;
+      doc.setFontSize(10);
+      doc.setTextColor(150, 150, 170);
+      doc.text(`Request ID: ${data.request_id}`, margin, yPos);
+      yPos += 6;
+    }
+
+    // Timestamp
+    yPos += 4;
+    doc.setFontSize(10);
+    doc.setTextColor(150, 150, 170);
+    const timestamp = new Date().toLocaleString();
+    doc.text(`Generated: ${timestamp}`, margin, yPos);
+    yPos += 8;
+
+    // Disclaimer
+    doc.setFontSize(9);
+    doc.setTextColor(180, 180, 190);
+    const disclaimer = 'This report is generated by automated analysis and is intended as a guide, not a definitive legal or journalistic conclusion. Human review is always recommended for high-stakes decisions.';
+    const disclaimerLines = doc.splitTextToSize(disclaimer, pageWidth - margin * 2);
+    doc.text(disclaimerLines, margin, yPos);
+    yPos += disclaimerLines.length * 5;
+
+    // Footer
+    doc.setFontSize(8);
+    doc.setTextColor(200, 200, 210);
+    doc.text('DeepFake Detectors © 2026', pageWidth - margin, 285, { align: 'right' });
+
+    doc.save(`deepfake-report-${Date.now()}.pdf`);
+  };
+
+  // --- PDF Download Handler (with fallback) ---
+  const handleDownloadPDF = async () => {
+    if (!result) return;
+
+    // If the API provided a report link, try to fetch and download it
+    if (result.report_link) {
+      try {
+        let fullUrl = result.report_link;
+        // If relative, prepend the API base URL
+        if (fullUrl.startsWith('/')) {
+          fullUrl = `${AUDIO_API_BASE}${fullUrl}`;
+        }
+        console.log('Fetching PDF from:', fullUrl);
+
+        const response = await fetch(fullUrl);
+        if (!response.ok) {
+          throw new Error(`Failed to fetch report: ${response.status}`);
+        }
+
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `deepfake-report-${result.request_id || Date.now()}.pdf`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
+        return;
+      } catch (error) {
+        console.error('Failed to download API report:', error);
+        // Fall back to local PDF generation
+        generateLocalPDF(result);
+      }
+    } else {
+      // No report link — generate local PDF
+      generateLocalPDF(result);
+    }
+  };
+
+  // --- Share handlers ---
+  const handleShare = async () => {
+    if (!result) return;
+
+    const shareText = `
+🔍 DeepFake Detectors — Analysis Result
+
+Verdict: ${result.verdict || 'N/A'}
+Confidence: ${result.confidence !== undefined ? Math.round(result.confidence * 100) + '%' : 'N/A'}
+
+${result.explanation ? result.explanation.slice(0, 3).join('\n') : ''}
+
+---
+Check your media at: ${window.location.href}
+    `.trim();
+
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: 'DeepFake Detectors — Analysis Result',
+          text: shareText,
+          url: window.location.href,
+        });
+        return;
+      } catch (err) {
+        if (err.name !== 'AbortError') {
+          console.error('Share failed:', err);
+        }
       }
     }
 
-    return {
-      verdict: verdict,
-      confidence: score,
-      explanation: explanation,
-      raw: data
-    };
-  } catch (error) {
-    console.error('Text API Error:', error);
-    let errorMessage = 'Analysis failed. Please try again.';
-    if (error.response) {
-      errorMessage = `API Error ${error.response.status}: ${error.response.data?.msg || error.response.data?.detail || error.response.statusText}`;
-    } else if (error.request) {
-      errorMessage = 'No response from server. Please check your connection.';
+    try {
+      await navigator.clipboard.writeText(shareText);
+      alert('✅ Results copied to clipboard! Share them with anyone.');
+    } catch (err) {
+      prompt('Copy this text to share:', shareText);
     }
-    throw new Error(errorMessage);
+  };
+
+  const handleWhatsAppShare = () => {
+    if (!result) return;
+    const message = `
+🔍 DeepFake Detectors Analysis
+Verdict: ${result.verdict || 'N/A'}
+Confidence: ${result.confidence !== undefined ? Math.round(result.confidence * 100) + '%' : 'N/A'}
+    `.trim();
+    const url = `https://wa.me/?text=${encodeURIComponent(message)}`;
+    window.open(url, '_blank');
+  };
+
+  const handleTwitterShare = () => {
+    if (!result) return;
+    const message = `🔍 My media was analyzed by DeepFake Detectors. Verdict: ${result.verdict || 'N/A'} with ${result.confidence !== undefined ? Math.round(result.confidence * 100) + '%' : 'N/A'} confidence. Check it out at ${window.location.href}`;
+    const url = `https://twitter.com/intent/tweet?text=${encodeURIComponent(message)}`;
+    window.open(url, '_blank');
+  };
+
+  // --- Loading state ---
+  if (isLoading) {
+    return (
+      <div className="mt-10 p-8 bg-[#141a26] rounded-2xl border border-[rgba(255,255,255,0.04)] text-center">
+        <div className="flex justify-center">
+          <div className="w-12 h-12 border-4 border-[#0090ff] border-t-transparent rounded-full animate-spin"></div>
+        </div>
+        <p className="text-[#8892b0] mt-4">Processing your media...</p>
+      </div>
+    );
   }
+
+  // --- Empty / no result state ---
+  if (!result) {
+    return (
+      <div className="mt-10 p-8 bg-[#141a26] rounded-2xl border border-[rgba(255,255,255,0.04)] text-center text-[#4a5470]">
+        <i className="fas fa-upload text-3xl block mb-3 text-[#4a5470]"></i>
+        <p className="font-medium text-[#8892b0]">Upload a file or paste a URL to see results here.</p>
+        <p className="text-sm">Results will show verdict, confidence score, and plain-language explanation.</p>
+      </div>
+    );
+  }
+
+  // --- Determine style based on verdict ---
+  const isFake = result.verdict?.toLowerCase().includes('fake') ||
+                 result.verdict?.toLowerCase().includes('synthetic') ||
+                 result.verdict?.toLowerCase().includes('misinformation');
+  const verdictColor = isFake ? 'text-[#ff4757]' : 'text-[#2ed573]';
+  const verdictBg = isFake ? 'bg-[#ff4757]/10' : 'bg-[#2ed573]/10';
+  const verdictBorder = isFake ? 'border-[#ff4757]/20' : 'border-[#2ed573]/20';
+
+  // --- Main results display ---
+  return (
+    <div className="mt-10 bg-[#141a26] rounded-2xl border border-[rgba(255,255,255,0.04)] overflow-hidden">
+      <div className={`p-6 border-b ${verdictBorder}`}>
+        <div className="flex items-center justify-between flex-wrap gap-4">
+          <div className="flex items-center gap-4">
+            <div className={`text-3xl font-bold ${verdictColor}`}>
+              {result.verdict || 'Result'}
+            </div>
+            <div className={`px-3 py-1 rounded-full text-sm font-semibold ${verdictBg} ${verdictColor}`}>
+              {result.confidence !== undefined ? `${Math.round(result.confidence * 100)}% confidence` : 'Confidence: N/A'}
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <button
+              className="px-4 py-2 bg-[#1e2638] hover:bg-[#2a3448] rounded-lg text-sm text-[#8892b0] transition-colors flex items-center gap-1.5"
+              onClick={handleShare}
+            >
+              <i className="fas fa-share-alt"></i> Share
+            </button>
+            <button
+              className="px-4 py-2 bg-[#1e2638] hover:bg-[#2a3448] rounded-lg text-sm text-[#25D366] transition-colors flex items-center gap-1.5"
+              onClick={handleWhatsAppShare}
+              title="Share on WhatsApp"
+            >
+              <i className="fab fa-whatsapp"></i>
+            </button>
+            <button
+              className="px-4 py-2 bg-[#1e2638] hover:bg-[#2a3448] rounded-lg text-sm text-[#1DA1F2] transition-colors flex items-center gap-1.5"
+              onClick={handleTwitterShare}
+              title="Share on Twitter/X"
+            >
+              <i className="fab fa-x-twitter"></i>
+            </button>
+            <button
+              className="px-4 py-2 bg-[#1e2638] hover:bg-[#2a3448] rounded-lg text-sm text-[#8892b0] transition-colors flex items-center gap-1.5"
+              onClick={handleDownloadPDF}
+              disabled={!result}
+            >
+              <i className="fas fa-download"></i> PDF
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="p-6">
+        <h4 className="text-sm font-semibold text-[#8892b0] uppercase tracking-wider mb-3">Explanation</h4>
+        <ul className="space-y-2">
+          {result.explanation && result.explanation.length > 0 ? (
+            result.explanation.map((item, idx) => (
+              <li key={idx} className="text-[#c8d0e8] text-sm flex items-start gap-2">
+                <span className="text-[#0090ff] mt-1">•</span>
+                {item}
+              </li>
+            ))
+          ) : (
+            <li className="text-[#8892b0] text-sm">No detailed explanation available.</li>
+          )}
+        </ul>
+
+        {result.request_id && (
+          <div className="mt-4 pt-4 border-t border-[rgba(255,255,255,0.04)]">
+            <p className="text-[#4a5470] text-xs">
+              Request ID: <span className="text-[#8892b0] font-mono">{result.request_id}</span>
+            </p>
+          </div>
+        )}
+      </div>
+
+      <div className="p-4 bg-[#0f1219] border-t border-[rgba(255,255,255,0.03)]">
+        <p className="text-[#4a5470] text-xs text-center">
+          <i className="fas fa-info-circle mr-1.5"></i>
+          This verdict is generated by automated analysis and is intended as a guide,
+          not a definitive legal or journalistic conclusion.
+        </p>
+      </div>
+    </div>
+  );
 };
 
-// ============================================================
-// MAIN SERVICE
-// ============================================================
-
-export const analyzeMedia = async (input) => {
-  if (input instanceof File) {
-    const fileType = input.type.split('/')[0];
-    
-    if (['audio'].includes(fileType)) {
-      return await analyzeAudio(input);
-    }
-    
-    if (fileType === 'video') {
-      return {
-        verdict: 'POSSIBLY SYNTHETIC',
-        confidence: 0.75,
-        explanation: ['Video analysis is coming soon.'],
-      };
-    }
-    
-    if (fileType === 'image') {
-      return {
-        verdict: 'POSSIBLY SYNTHETIC',
-        confidence: 0.70,
-        explanation: ['Image analysis is coming soon.'],
-      };
-    }
-    
-    return {
-      verdict: 'POSSIBLY SYNTHETIC',
-      confidence: 0.50,
-      explanation: ['Unsupported file type.'],
-    };
-  }
-  
-  if (input.url) {
-    return {
-      verdict: 'NEEDS REVIEW',
-      confidence: 0.50,
-      explanation: ['URL analysis is coming soon. Please paste the text content directly.'],
-    };
-  }
-  
-  if (typeof input === 'string') {
-    return await analyzeText(input);
-  }
-
-  throw new Error('Unsupported input type');
-};
-
-export default { analyzeMedia, analyzeAudio, analyzeText };
+export default Results;
