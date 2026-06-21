@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-// API Base URLs from your friend
+// API Base URLs
 const AUDIO_API_URL = 'https://audio-deepfake-detector.reddune-ee354d90.francecentral.azurecontainerapps.io/api/v1';
 const TEXT_API_URL = 'https://text-credibility-detector.reddune-ee354d90.francecentral.azurecontainerapps.io';
 
@@ -17,49 +17,84 @@ export const analyzeAudio = async (file) => {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
-      timeout: 60000, // 60 seconds
+      timeout: 60000,
     });
 
-    // Transform response to our unified format
     const data = response.data;
+    console.log('Audio API Response:', data); // Debug log
+
+    // --- Map API response to our unified format ---
     
-    // Map prediction to verdict
-    let verdict = 'LIKELY SYNTHETIC';
-    let isFake = true;
+    // Determine verdict based on prediction_label
+    let verdict = 'POSSIBLY SYNTHETIC';
+    let confidence = data.avg_confidence || 0.5;
     
-    if (data.prediction === 'bona-fide' || data.confidence < 0.45) {
+    // Check if we have model_predictions
+    if (data.model_predictions) {
+      // Calculate average confidence from all models
+      const scores = Object.values(data.model_predictions);
+      confidence = scores.reduce((a, b) => a + b, 0) / scores.length;
+    }
+    
+    // Use prediction_label if available
+    if (data.prediction_label) {
+      const label = data.prediction_label.toLowerCase();
+      if (label === 'bona-fide' || label === 'real' || label === 'authentic') {
+        verdict = 'LIKELY AUTHENTIC';
+      } else if (label === 'spoof' || label === 'fake' || label === 'synthetic') {
+        verdict = 'LIKELY SYNTHETIC';
+      } else {
+        verdict = 'POSSIBLY SYNTHETIC';
+      }
+    } else if (confidence < 0.45) {
       verdict = 'LIKELY AUTHENTIC';
-      isFake = false;
-    } else if (data.confidence >= 0.45 && data.confidence <= 0.55) {
+    } else if (confidence >= 0.45 && confidence <= 0.55) {
       verdict = 'POSSIBLY SYNTHETIC';
-      isFake = true;
     } else {
       verdict = 'LIKELY SYNTHETIC';
-      isFake = true;
     }
 
-    // Build explanation from scores
+    // --- Build explanation from available data ---
     const explanation = [];
-    if (data.scores) {
-      if (data.scores.wav2vec2_score !== undefined) {
-        explanation.push(`Wav2Vec2 analysis shows ${data.scores.wav2vec2_score > 0.5 ? 'synthetic' : 'natural'} speech patterns`);
-      }
-      if (data.scores.aasist_score !== undefined) {
-        explanation.push(`AASIST analysis detects ${data.scores.aasist_score > 0.5 ? 'artifacts' : 'no artifacts'}`);
+    
+    if (data.model_predictions) {
+      const models = data.model_predictions;
+      for (const [model, score] of Object.entries(models)) {
+        const modelName = model.charAt(0).toUpperCase() + model.slice(1);
+        const status = score > 0.5 ? 'detected synthetic patterns' : 'detected natural patterns';
+        explanation.push(`${modelName} analysis: ${score.toFixed(2)} confidence — ${status}`);
       }
     }
+    
+    if (data.emotion_labels && data.emotion_labels.length > 0) {
+      explanation.push(`Detected emotion(s): ${data.emotion_labels.join(', ')}`);
+    }
+    
+    // Add overall confidence
+    explanation.push(`Overall confidence: ${(confidence * 100).toFixed(1)}%`);
 
     return {
       verdict: verdict,
-      confidence: data.confidence || 0,
-      explanation: explanation.length > 0 ? explanation : ['Analysis complete. Review the report for details.'],
-      request_id: data.request_id,
+      confidence: confidence,
+      explanation: explanation,
+      request_id: data.request_id || null,
       report_link: data.report_download_link || null,
       raw: data
     };
   } catch (error) {
     console.error('Audio API Error:', error);
-    throw error;
+    
+    // Get the actual error message from the response
+    let errorMessage = 'Analysis failed. Please try again.';
+    if (error.response) {
+      console.error('Response data:', error.response.data);
+      console.error('Response status:', error.response.status);
+      errorMessage = `API Error: ${error.response.data?.msg || error.response.data?.detail || error.response.statusText || 'Unknown error'}`;
+    } else if (error.request) {
+      errorMessage = 'No response from server. Please check your connection.';
+    }
+    
+    throw new Error(errorMessage);
   }
 };
 
@@ -76,15 +111,15 @@ export const analyzeText = async (text) => {
         headers: {
           'Content-Type': 'application/json',
         },
-        timeout: 60000, // 60 seconds
+        timeout: 60000,
       }
     );
 
     const data = response.data;
+    console.log('Text API Response:', data);
 
-    // Transform response to our unified format
-    let verdict = 'LIKELY AUTHENTIC';
     const score = data.credibility_score || 0;
+    let verdict = 'LIKELY AUTHENTIC';
 
     if (score >= 0.75) {
       verdict = 'LIKELY AUTHENTIC';
@@ -94,7 +129,6 @@ export const analyzeText = async (text) => {
       verdict = 'LIKELY MISINFORMATION';
     }
 
-    // Build explanation from signals
     const explanation = [];
     
     if (data.signals?.fact_check?.matches) {
@@ -109,7 +143,6 @@ export const analyzeText = async (text) => {
       });
     }
 
-    // Add some default explanations if none were generated
     if (explanation.length === 0) {
       if (score >= 0.75) {
         explanation.push('Content shows strong credibility indicators');
@@ -128,69 +161,63 @@ export const analyzeText = async (text) => {
     };
   } catch (error) {
     console.error('Text API Error:', error);
-    throw error;
+    let errorMessage = 'Analysis failed. Please try again.';
+    if (error.response) {
+      errorMessage = `API Error: ${error.response.data?.msg || error.response.data?.detail || error.response.statusText || 'Unknown error'}`;
+    } else if (error.request) {
+      errorMessage = 'No response from server. Please check your connection.';
+    }
+    throw new Error(errorMessage);
   }
 };
 
 // ============================================================
-// MAIN SERVICE — Detect media type and route accordingly
+// MAIN SERVICE
 // ============================================================
 
 export const analyzeMedia = async (input) => {
-  // If input is a File object
   if (input instanceof File) {
     const fileType = input.type.split('/')[0];
     
-    // Audio files
     if (['audio'].includes(fileType)) {
       return await analyzeAudio(input);
     }
     
-    // Video files - check if it's video
     if (fileType === 'video') {
-      // Video API not yet available - placeholder
       return {
         verdict: 'POSSIBLY SYNTHETIC',
         confidence: 0.75,
-        explanation: ['Video analysis is coming soon. Please check the audio or images for now.'],
+        explanation: ['Video analysis is coming soon.'],
       };
     }
     
-    // Image files
     if (fileType === 'image') {
-      // Image API not yet available - placeholder
       return {
         verdict: 'POSSIBLY SYNTHETIC',
         confidence: 0.70,
-        explanation: ['Image analysis is coming soon. Please check the audio or text for now.'],
+        explanation: ['Image analysis is coming soon.'],
       };
     }
     
-    // Default fallback
     return {
       verdict: 'POSSIBLY SYNTHETIC',
       confidence: 0.50,
-      explanation: ['Unsupported file type for automated analysis.'],
+      explanation: ['Unsupported file type.'],
     };
   }
   
-  // If input has a URL property
   if (input.url) {
-    // For URL, we could fetch and analyze the content
-    // For now, return a placeholder
     return {
       verdict: 'NEEDS REVIEW',
       confidence: 0.50,
-      explanation: ['URL analysis is coming soon. For now, please paste the text content directly.'],
+      explanation: ['URL analysis is coming soon. Please paste the text content directly.'],
     };
   }
   
-  // If input is a string (text)
   if (typeof input === 'string') {
     return await analyzeText(input);
   }
 
-  // Default fallback
   throw new Error('Unsupported input type');
 };
 
