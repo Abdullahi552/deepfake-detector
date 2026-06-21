@@ -21,79 +21,61 @@ export const analyzeAudio = async (file) => {
     });
 
     const data = response.data;
-    console.log('Audio API Response:', data); // Debug log
+    console.log('Audio API Response:', data);
 
-    // --- Map API response to our unified format ---
+    // --- Parse the actual response ---
+    const prediction = data.prediction || 'unknown';
+    const confidence = data.confidence || 0.5;
+    const scores = data.scores || {};
+    const reportLink = data.report_download_link || null;
+    const requestId = data.request_id || null;
     
-    // Determine verdict based on prediction_label
+    // --- Determine verdict ---
     let verdict = 'POSSIBLY SYNTHETIC';
-    let confidence = data.avg_confidence || 0.5;
-    
-    // Check if we have model_predictions
-    if (data.model_predictions) {
-      // Calculate average confidence from all models
-      const scores = Object.values(data.model_predictions);
-      confidence = scores.reduce((a, b) => a + b, 0) / scores.length;
-    }
-    
-    // Use prediction_label if available
-    if (data.prediction_label) {
-      const label = data.prediction_label.toLowerCase();
-      if (label === 'bona-fide' || label === 'real' || label === 'authentic') {
-        verdict = 'LIKELY AUTHENTIC';
-      } else if (label === 'spoof' || label === 'fake' || label === 'synthetic') {
-        verdict = 'LIKELY SYNTHETIC';
-      } else {
-        verdict = 'POSSIBLY SYNTHETIC';
-      }
+    const predLower = prediction.toLowerCase();
+    if (predLower === 'bona-fide' || predLower === 'real' || predLower === 'authentic') {
+      verdict = 'LIKELY AUTHENTIC';
+    } else if (predLower === 'spoof' || predLower === 'fake' || predLower === 'synthetic') {
+      verdict = 'LIKELY SYNTHETIC';
     } else if (confidence < 0.45) {
       verdict = 'LIKELY AUTHENTIC';
     } else if (confidence >= 0.45 && confidence <= 0.55) {
       verdict = 'POSSIBLY SYNTHETIC';
-    } else {
-      verdict = 'LIKELY SYNTHETIC';
     }
 
-    // --- Build explanation from available data ---
+    // --- Build explanation from scores ---
     const explanation = [];
     
-    if (data.model_predictions) {
-      const models = data.model_predictions;
-      for (const [model, score] of Object.entries(models)) {
-        const modelName = model.charAt(0).toUpperCase() + model.slice(1);
+    if (scores && typeof scores === 'object') {
+      for (const [model, score] of Object.entries(scores)) {
+        const modelName = model.charAt(0).toUpperCase() + model.slice(1).replace(/_/g, ' ');
         const status = score > 0.5 ? 'detected synthetic patterns' : 'detected natural patterns';
-        explanation.push(`${modelName} analysis: ${score.toFixed(2)} confidence — ${status}`);
+        explanation.push(`${modelName}: ${(score * 100).toFixed(1)}% — ${status}`);
       }
     }
+    
+    explanation.push(`Overall confidence: ${(confidence * 100).toFixed(1)}%`);
     
     if (data.emotion_labels && data.emotion_labels.length > 0) {
       explanation.push(`Detected emotion(s): ${data.emotion_labels.join(', ')}`);
     }
-    
-    // Add overall confidence
-    explanation.push(`Overall confidence: ${(confidence * 100).toFixed(1)}%`);
 
     return {
       verdict: verdict,
       confidence: confidence,
       explanation: explanation,
-      request_id: data.request_id || null,
-      report_link: data.report_download_link || null,
+      request_id: requestId,
+      report_link: reportLink,
       raw: data
     };
   } catch (error) {
     console.error('Audio API Error:', error);
-    
-    // Get the actual error message from the response
     let errorMessage = 'Analysis failed. Please try again.';
     if (error.response) {
-      console.error('Response data:', error.response.data);
-      console.error('Response status:', error.response.status);
-      errorMessage = `API Error: ${error.response.data?.msg || error.response.data?.detail || error.response.statusText || 'Unknown error'}`;
+      errorMessage = `API Error ${error.response.status}: ${error.response.data?.msg || error.response.data?.detail || error.response.statusText}`;
     } else if (error.request) {
       errorMessage = 'No response from server. Please check your connection.';
     }
-    
     throw new Error(errorMessage);
   }
 };
@@ -132,10 +114,10 @@ export const analyzeText = async (text) => {
     const explanation = [];
     
     if (data.signals?.fact_check?.matches) {
-      explanation.push(`Fact-check: ${data.signals.fact_check.matches.length} matches found with known claims`);
+      explanation.push(`Fact-check: ${data.signals.fact_check.matches.length} matches found`);
     }
     if (data.signals?.claimbuster?.score !== undefined) {
-      explanation.push(`ClaimBuster credibility score: ${Math.round(data.signals.claimbuster.score * 100)}%`);
+      explanation.push(`ClaimBuster credibility: ${Math.round(data.signals.claimbuster.score * 100)}%`);
     }
     if (data.signals?.content_analysis?.flags) {
       data.signals.content_analysis.flags.forEach(flag => {
@@ -163,7 +145,7 @@ export const analyzeText = async (text) => {
     console.error('Text API Error:', error);
     let errorMessage = 'Analysis failed. Please try again.';
     if (error.response) {
-      errorMessage = `API Error: ${error.response.data?.msg || error.response.data?.detail || error.response.statusText || 'Unknown error'}`;
+      errorMessage = `API Error ${error.response.status}: ${error.response.data?.msg || error.response.data?.detail || error.response.statusText}`;
     } else if (error.request) {
       errorMessage = 'No response from server. Please check your connection.';
     }
