@@ -2,8 +2,9 @@ import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
 
 const Results = ({ result, isLoading }) => {
-  // --- Base URL for the audio API (for report links) ---
+  // --- Base URLs for the APIs ---
   const AUDIO_API_BASE = 'https://audio-deepfake-detector.reddune-ee354d90.francecentral.azurecontainerapps.io';
+  const VIDEO_API_BASE = 'https://deepfake-api.reddune-ee354d90.francecentral.azurecontainerapps.io';
 
   // --- Generate a local PDF report (fallback) ---
   const generateLocalPDF = (data) => {
@@ -101,18 +102,25 @@ const Results = ({ result, isLoading }) => {
     doc.save(`deepfake-report-${Date.now()}.pdf`);
   };
 
-  // --- PDF Download Handler (with fallback) ---
+  // --- PDF Download Handler (with video support) ---
   const handleDownloadPDF = async () => {
     if (!result) return;
 
-    // If the API provided a report link, try to fetch and download it
-    if (result.report_link) {
+    // If the API provided a report link or report_id
+    if (result.report_link || result.report_id) {
       try {
-        let fullUrl = result.report_link;
-        // If relative, prepend the API base URL
-        if (fullUrl.startsWith('/')) {
-          fullUrl = `${AUDIO_API_BASE}${fullUrl}`;
+        let fullUrl;
+        if (result.isVideo) {
+          // Video API report
+          fullUrl = `${VIDEO_API_BASE}/report/${result.report_id}`;
+        } else if (result.report_link) {
+          // Audio API report
+          fullUrl = result.report_link;
+          if (fullUrl.startsWith('/')) {
+            fullUrl = `${AUDIO_API_BASE}${fullUrl}`;
+          }
         }
+
         console.log('Fetching PDF from:', fullUrl);
 
         const response = await fetch(fullUrl);
@@ -124,7 +132,7 @@ const Results = ({ result, isLoading }) => {
         const url = window.URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
-        link.download = `deepfake-report-${result.request_id || Date.now()}.pdf`;
+        link.download = `deepfake-report-${result.report_id || Date.now()}.pdf`;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -132,7 +140,6 @@ const Results = ({ result, isLoading }) => {
         return;
       } catch (error) {
         console.error('Failed to download API report:', error);
-        // Fall back to local PDF generation
         generateLocalPDF(result);
       }
     } else {
@@ -206,6 +213,7 @@ Confidence: ${result.confidence !== undefined ? Math.round(result.confidence * 1
           <div className="w-12 h-12 border-4 border-[#0090ff] border-t-transparent rounded-full animate-spin"></div>
         </div>
         <p className="text-[#8892b0] mt-4">Processing your media...</p>
+        <p className="text-[#4a5470] text-xs mt-2">Video analysis may take 30-90 seconds</p>
       </div>
     );
   }
@@ -222,12 +230,30 @@ Confidence: ${result.confidence !== undefined ? Math.round(result.confidence * 1
   }
 
   // --- Determine style based on verdict ---
-  const isFake = result.verdict?.toLowerCase().includes('fake') ||
-                 result.verdict?.toLowerCase().includes('synthetic') ||
-                 result.verdict?.toLowerCase().includes('misinformation');
-  const verdictColor = isFake ? 'text-[#ff4757]' : 'text-[#2ed573]';
-  const verdictBg = isFake ? 'bg-[#ff4757]/10' : 'bg-[#2ed573]/10';
-  const verdictBorder = isFake ? 'border-[#ff4757]/20' : 'border-[#2ed573]/20';
+  const verdictText = result.verdict || '';
+  const isFake = verdictText.toLowerCase().includes('fake') ||
+                 verdictText.toLowerCase().includes('synthetic') ||
+                 verdictText.toLowerCase().includes('misinformation');
+  const isNoFace = verdictText.toLowerCase().includes('no face');
+  const isReview = verdictText.toLowerCase().includes('review') || verdictText.toLowerCase().includes('uncertain');
+  
+  let verdictColor = 'text-[#2ed573]';
+  let verdictBg = 'bg-[#2ed573]/10';
+  let verdictBorder = 'border-[#2ed573]/20';
+
+  if (isFake) {
+    verdictColor = 'text-[#ff4757]';
+    verdictBg = 'bg-[#ff4757]/10';
+    verdictBorder = 'border-[#ff4757]/20';
+  } else if (isNoFace) {
+    verdictColor = 'text-[#8892b0]';
+    verdictBg = 'bg-[#8892b0]/10';
+    verdictBorder = 'border-[#8892b0]/20';
+  } else if (isReview) {
+    verdictColor = 'text-[#f59e0b]';
+    verdictBg = 'bg-[#f59e0b]/10';
+    verdictBorder = 'border-[#f59e0b]/20';
+  }
 
   // --- Main results display ---
   return (

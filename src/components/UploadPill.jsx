@@ -129,7 +129,7 @@ const UploadPill = ({ onAnalyze, isLoading }) => {
           ref={fileInputRef}
           onChange={handleFileSelect}
           className="hidden"
-          accept="audio/*,.wav,.flac,.mp3,.m4a,.ogg,image/*,video/*,.txt"
+          accept="audio/*,.wav,.flac,.mp3,.m4a,.ogg,video/*,.mp4,.avi,.mov,.mkv,.webm,.txt"
         />
       </div>
 
@@ -156,8 +156,8 @@ const UploadPill = ({ onAnalyze, isLoading }) => {
       <div className="flex gap-6 justify-center mt-4 text-[#4a5470] text-sm flex-wrap">
         <span><i className="fas fa-microphone text-[#6ab0ff] mr-1.5"></i> Audio</span>
         <span><i className="fas fa-file-alt text-[#6ab0ff] mr-1.5"></i> Text</span>
+        <span><i className="fas fa-video text-[#6ab0ff] mr-1.5"></i> Video</span>
         <span><i className="fas fa-image text-[#4a5470] mr-1.5"></i> Image (coming soon)</span>
-        <span><i className="fas fa-video text-[#4a5470] mr-1.5"></i> Video (coming soon)</span>
       </div>
     </div>
   );
