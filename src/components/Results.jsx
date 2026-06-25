@@ -5,6 +5,7 @@ const Results = ({ result, isLoading }) => {
   // --- Base URLs for the APIs ---
   const AUDIO_API_BASE = 'https://audio-deepfake-detector.reddune-ee354d90.francecentral.azurecontainerapps.io';
   const VIDEO_API_BASE = 'https://deepfake-api.reddune-ee354d90.francecentral.azurecontainerapps.io';
+  const IMAGE_API_BASE = 'http://xai-detector.germanywestcentral.azurecontainer.io:8000';
 
   // --- Generate a local PDF report (fallback) ---
   const generateLocalPDF = (data) => {
@@ -36,7 +37,15 @@ const Results = ({ result, isLoading }) => {
     const isFake = verdictText.toLowerCase().includes('fake') ||
                    verdictText.toLowerCase().includes('synthetic') ||
                    verdictText.toLowerCase().includes('misinformation');
-    doc.setTextColor(isFake ? 255 : 46, isFake ? 71 : 213, isFake ? 87 : 115);
+    const isNoFace = verdictText.toLowerCase().includes('no face');
+    const isReview = verdictText.toLowerCase().includes('review') || verdictText.toLowerCase().includes('uncertain');
+    
+    let color = [46, 213, 115]; // Green
+    if (isFake) color = [255, 71, 87]; // Red
+    else if (isNoFace) color = [136, 146, 176]; // Gray
+    else if (isReview) color = [245, 158, 11]; // Amber
+    
+    doc.setTextColor(color[0], color[1], color[2]);
     doc.text(verdictText, margin + 30, yPos);
     yPos += 8;
 
@@ -102,7 +111,7 @@ const Results = ({ result, isLoading }) => {
     doc.save(`deepfake-report-${Date.now()}.pdf`);
   };
 
-  // --- PDF Download Handler (with video support) ---
+  // --- PDF Download Handler ---
   const handleDownloadPDF = async () => {
     if (!result) return;
 
@@ -110,15 +119,27 @@ const Results = ({ result, isLoading }) => {
     if (result.report_link || result.report_id) {
       try {
         let fullUrl;
+        const reportId = result.report_id || result.request_id;
+        
         if (result.isVideo) {
           // Video API report
-          fullUrl = `${VIDEO_API_BASE}/report/${result.report_id}`;
+          fullUrl = `${VIDEO_API_BASE}/report/${reportId}`;
+        } else if (result.report_link && result.report_link.startsWith('/')) {
+          // Image API report (starts with /report/)
+          if (result.report_link.includes('/report/')) {
+            fullUrl = `${IMAGE_API_BASE}${result.report_link}`;
+          } else {
+            // Audio API report
+            fullUrl = `${AUDIO_API_BASE}${result.report_link}`;
+          }
         } else if (result.report_link) {
-          // Audio API report
           fullUrl = result.report_link;
           if (fullUrl.startsWith('/')) {
             fullUrl = `${AUDIO_API_BASE}${fullUrl}`;
           }
+        } else if (reportId) {
+          // Try video API as fallback
+          fullUrl = `${VIDEO_API_BASE}/report/${reportId}`;
         }
 
         console.log('Fetching PDF from:', fullUrl);
@@ -132,7 +153,7 @@ const Results = ({ result, isLoading }) => {
         const url = window.URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
-        link.download = `deepfake-report-${result.report_id || Date.now()}.pdf`;
+        link.download = `deepfake-report-${reportId || Date.now()}.pdf`;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -213,7 +234,7 @@ Confidence: ${result.confidence !== undefined ? Math.round(result.confidence * 1
           <div className="w-12 h-12 border-4 border-[#0090ff] border-t-transparent rounded-full animate-spin"></div>
         </div>
         <p className="text-[#8892b0] mt-4">Processing your media...</p>
-        <p className="text-[#4a5470] text-xs mt-2">Video analysis may take 30-90 seconds</p>
+        <p className="text-[#4a5470] text-xs mt-2">Video analysis may take 30-90 seconds. First request may take up to 60s.</p>
       </div>
     );
   }

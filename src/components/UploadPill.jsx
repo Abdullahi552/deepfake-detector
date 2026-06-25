@@ -11,6 +11,12 @@ const UploadPill = ({ onAnalyze, isLoading }) => {
   const handleFileSelect = (e) => {
     const selectedFile = e.target.files[0];
     if (selectedFile) {
+      // Validate file size (video files can be up to 100MB)
+      if (selectedFile.size > 100 * 1024 * 1024) {
+        alert('File is too large. Maximum size is 100MB for video, 50MB for audio, 20MB for images.');
+        e.target.value = '';
+        return;
+      }
       setFile(selectedFile);
       setUrl('');
       setText('');
@@ -129,7 +135,7 @@ const UploadPill = ({ onAnalyze, isLoading }) => {
           ref={fileInputRef}
           onChange={handleFileSelect}
           className="hidden"
-          accept="audio/*,.wav,.flac,.mp3,.m4a,.ogg,video/*,.mp4,.avi,.mov,.mkv,.webm,.txt"
+          accept="audio/*,.wav,.flac,.mp3,.m4a,.ogg,video/*,.mp4,.avi,.mov,.mkv,.webm,.flv,image/*,.jpeg,.jpg,.png,.webp,.txt"
         />
       </div>
 
@@ -157,7 +163,7 @@ const UploadPill = ({ onAnalyze, isLoading }) => {
         <span><i className="fas fa-microphone text-[#6ab0ff] mr-1.5"></i> Audio</span>
         <span><i className="fas fa-file-alt text-[#6ab0ff] mr-1.5"></i> Text</span>
         <span><i className="fas fa-video text-[#6ab0ff] mr-1.5"></i> Video</span>
-        <span><i className="fas fa-image text-[#4a5470] mr-1.5"></i> Image (coming soon)</span>
+        <span><i className="fas fa-image text-[#6ab0ff] mr-1.5"></i> Image</span>
       </div>
     </div>
   );

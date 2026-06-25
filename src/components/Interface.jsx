@@ -34,7 +34,7 @@ const Interface = ({ onBack }) => {
       setResult({
         verdict: 'ERROR',
         confidence: 0,
-        explanation: ['Analysis failed. Please try again. If this persists, check your API connection.'],
+        explanation: [error.message || 'Analysis failed. Please try again.'],
         error: error.message
       });
     } finally {
@@ -58,7 +58,13 @@ const Interface = ({ onBack }) => {
           <i className="fas fa-shield-halved text-[#0090ff] mr-3"></i>DeepFake Detector
         </h1>
         <p className="text-[#8892b0]">Upload any media or paste a URL. We'll tell you if it's real or AI-generated.</p>
-        <p className="text-[#4a5470] text-sm mt-1">Currently supports: Audio, Video, and Text. Video analysis may take 30-90 seconds.</p>
+        <p className="text-[#4a5470] text-sm mt-1">
+          Supports: Audio (WAV, FLAC, MP3, M4A, OGG) • Video (MP4, AVI, MOV, WebM, FLV) • 
+          Image (JPEG, PNG, WEBP) • Text content
+        </p>
+        <p className="text-[#4a5470] text-xs mt-1">
+          ⏱️ Video analysis: 30-90 seconds • First request may take up to 60s (cold start)
+        </p>
       </div>
 
       {/* Upload pill */}
